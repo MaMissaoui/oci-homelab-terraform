@@ -1,219 +1,135 @@
 # oci-homelab-terraform
-these are terraform scripts which you can use to setup your Oracle Cloud Interface - it will provision the best machine for you in the Free Tier
 
-# oci-homelab-terraform
+Terraform configuration to provision an [Oracle Cloud Always Free](https://www.oracle.com/cloud/free/) ARM64 VM optimised for self-hosting internet-facing web applications with Docker Compose.
 
-Oracle Cloud Infrastructure (OCI) has a generous free option for ARM64 based instances - 4 CPUs with 24 GB memory (and
-more - for details see [Always Free Resources][afr] docs).
+## What this deploys
 
-This repo contains Terraform plan that builds the infrastructure matching free resource limits with an emphasis
-on basic security principles:
-  * Instance is not exposed to the internet - stays behind NAT with only egress traffic allowed
-  * Automated Wireguard client setup
+| Resource | Details |
+|---|---|
+| **Compute** | Ampere A1 Flex — 4 OCPUs, 24 GB RAM, 200 GB boot volume |
+| **OS** | Ubuntu 24.04 LTS (Noble), ARM64 |
+| **Networking** | VCN + subnet with Internet Gateway; ports 22/80/443 always open |
+| **Security** | SSH hardened (no root, no password auth); AppArmor disabled for container workloads |
+| **Backups** | Daily incremental + weekly full boot-volume snapshots |
+| **Software** | Docker, Docker Compose plugin, `ctop`, `s5cmd`, `htop`, `git` |
+| **WireGuard** | Optional — enabled only when `wg_config` is set in `terraform.tfvars` |
 
-The main goal for this project is an ultimate self hosted homelab setup with site-to-site VPN based on
-[Cloudflare WARP-to-WARP][w2w] using vanilla Wireguard with [warp.sh][wsh]. \
-At least it's what I did 😉
+## Prerequisites
 
-- LTS OS
-- SSH-only access
-- Private-only networking
-- One-way initiated tunnel
-- Zero inbound attack surface
--- This is enterprise-grade design, not homelab cosplay.
+1. **Oracle Cloud account** — [sign up](https://www.oracle.com/cloud/free/), then [upgrade to PAYG](https://docs.oracle.com/en-us/iaas/Content/GSG/Tasks/signingup.htm) (you won't be charged while inside Always Free limits)
+2. **Terraform** — `brew install hashicorp/tap/terraform`
+3. **OCI API key** — generate in the Console under *User Settings → API Keys*, download the `.pem`
+4. **SSH key pair** — `ssh-keygen -t ed25519` if you don't have one
 
-## Usage - How to use my repository
+## Usage
 
-### OCI Account Creation
+### 1. Clone and initialise
 
-1. **Create an account** \
-    Sign up for an Oracle Cloud account [here][oci]. You will need to provide credit card details for verification
-    (Oracle will charge and immediately reverse a $100 fee).
-
-2. **Upgrade to PAYG** \
-    Convert your account to *Pay As You Go* (PAYG) as described [here][payg]. You won't be charged as long as you stay
-    within the *Free Tier* [limits][afr].
-
-3. **Set Governance Rules** \
-    Optionally, set *Governance Rules* to enforce limits on main resources. See this [Reddit post][gov] for guidance.
-
-#### Image - OS
-
-I have selected Ubuntu over notmal Linux OS, because of ease of use as well it is the best alternative to deploy major set of services for which we are creating this instance. 
-
-# Oracle Cloud Always Free Homelab Infrastructure
-
-This repository contains Terraform configurations to deploy a secure, "Always Free" capable infrastructure on Oracle Cloud (OCI). It provisions a high-performance ARM64 Ubuntu VM tailored for self-hosting, complete with WireGuard VPN, Docker, and automatic backups.
-
-## 🏗 What This Deploys
-
-* **Compute:**
-    * 1x **Ampere A1 Compute Instance** (ARM64) with 4 OCPUs and 24GB RAM.
-    * OS: Ubuntu 22.04 LTS (Canonical).
-* **Networking:**
-    * Custom VCN (`172.16.0.0/16`) and Private Subnet (`172.16.0.0/24`).
-    * **Hardened Security List:** Only allows outgoing traffic and incoming WireGuard UDP traffic (Port 51820).
-    * **Service Gateway:** Secure internal access to Oracle Object Storage without traversing the public internet.
-* **Storage & Backups:**
-    * 100GB Boot Volume. (You can go uptill 200 GB which is FREE, but I want to keep a buffer as this can be attached anytime later)
-    * **Automated Backups:** Daily and Weekly gold/bronze policy backups.
-    * **Object Storage Bucket:** Created for S3-compatible app backups.
-* **Software Stack (via Cloud-Init):**
-    * **Docker & Docker Compose:** Pre-installed for container management.
-    * **WireGuard:** Pre-configured VPN interface (`wg0`) for secure private access.
-    * **Utilities:** `s5cmd` (fast S3 client), `ctop` (container monitoring), `htop`, `git`.
-    * **Security:** Password login disabled, Root login disabled, SSH hardened.
-
-## 🚀 Prerequisites
-
-1.  **Oracle Cloud Account:** A verified account with access to the "Always Free" tier.
-2.  **Terraform:** [Install Terraform](https://developer.hashicorp.com/terraform/downloads) on your local machine.
-3.  **OCI API Keys:**
-    * Generate an API Key pair in the Oracle Console (User Settings -> API Keys).
-    * Download the private key (`.pem`) to your computer.
-    * Note your Tenancy OCID, User OCID, and Fingerprint.
-4.  **SSH Key Pair:** A local SSH key (`~/.ssh/id_ed25519` or similar) to access the VM.
-
-## 🛠️ Usage Instructions
-
-### 1. Clone & Initialize
-Clone this repository and initialize Terraform:
 ```bash
-git clone https://github.com/goyalvipul/oci-homelab-terraform.git
+git clone https://github.com/MaMissaoui/oci-homelab-terraform.git
 cd oci-homelab-terraform
 terraform init
-terraform plan
 ```
-### **Part 2: 
-1. Configure Variables
-Copy the example variables file:
+
+### 2. Configure
+
 ```bash
 cp terraform.tfvars.example terraform.tfvars
 ```
 
-2. Generate Password Hash (Optional)
-If you want to set a sudo password for the user (to allow sudo access without relying solely on SSH keys), generate a SHA-512 hash locally:
+Edit `terraform.tfvars` with your OCI credentials and SSH public key. All other values have sensible defaults for an Always Free setup.
 
-```
-# Run this on your local machine
-python3 -c 'import crypt; print(crypt.crypt("YOUR_SECRET_PASSWORD", crypt.mksalt(crypt.METHOD_SHA512)))'
-Update main.tf (under the users block) with this hash string.
+#### Required values
+
+| Variable | Where to find it |
+|---|---|
+| `oci_connection.tenancy_ocid` | Console → Profile → Tenancy → Copy OCID |
+| `oci_connection.user_ocid` | Console → Profile → User Settings → Copy OCID |
+| `oci_connection.fingerprint` | Console → User Settings → API Keys |
+| `oci_connection.private_key_path` | Local path to the downloaded `.pem` file |
+| `vm.ssh_public_keys` | Output of `cat ~/.ssh/id_ed25519.pub` |
+
+#### Optional: sudo password
+
+If you want password-based `sudo`, generate a SHA-512 hash and set it as `vm.os.password`:
+
+```bash
+python3 -c 'import crypt; print(crypt.crypt("YOUR_PASSWORD", crypt.mksalt(crypt.METHOD_SHA512)))'
 ```
 
-3. Deploy
-Review the plan and apply:
+#### Optional: WireGuard
 
+Leave `wg_config = {}` to skip WireGuard entirely. To enable it, populate the map with your interface config — port 51820 will be opened automatically:
+
+```hcl
+wg_config = {
+  "wg0" = <<EOF
+[Interface]
+PrivateKey = <SERVER_PRIVATE_KEY>
+Address    = 10.200.0.2/32
+ListenPort = 51820
+
+[Peer]
+PublicKey          = <CLIENT_PUBLIC_KEY>
+AllowedIPs         = 10.200.0.1/32
+PersistentKeepalive = 25
+EOF
+}
 ```
+
+Generate a key pair with:
+
+```bash
+wg genkey | tee privatekey | wg pubkey > publickey
+```
+
+### 3. Deploy
+
+```bash
 terraform plan
 terraform apply
 ```
 
-4. Connect
-After deployment, Terraform will output the Public IP of the instance.
+Terraform outputs the VM's public IP on success.
 
-* WireGuard: Update your local WireGuard client with the Peer configuration matching the server keys you generated.
+### 4. Connect
 
-* SSH: Access the VM securely over the VPN (recommended) or Public IP (if configured):
-
-```
-# Via VPN (Private IP)
-ssh infra@10.200.0.2
+```bash
+ssh mamsoft@<PUBLIC_IP>
 ```
 
-## 🔑 Configuration Guide: Where to Get Keys
+Docker Compose files can be placed anywhere under the `mamsoft` home directory. The Docker daemon listens on `127.0.0.1` only — expose services via a reverse proxy (e.g. Traefik, Caddy, or nginx-proxy) bound to ports 80/443.
 
-| Variable | Where to find it? |
-| :--- | :--- |
-| **`tenancy_ocid`** | Oracle Console -> Profile Icon -> Tenancy: [Name] -> Copy OCID. |
-| **`user_ocid`** | Oracle Console -> Profile Icon -> User Settings -> Copy OCID. |
-| **`fingerprint`** | Oracle Console -> User Settings -> API Keys (It appears after you add a key). |
-| **`private_key_path`** | The absolute path on your computer where you saved the `.pem` file from Oracle. |
-| **`compartment_ocid`** | Oracle Console -> Identity & Security -> Compartments -> Copy OCID (usually same as Tenancy for root). |
-| **`ssh_public_keys`** | Run `cat ~/.ssh/id_ed25519.pub` on your local machine. |
-TO generate these keys - 
-Run - ssh-keygen -y -f ~/.oci/(.pem file) > ~/.oci/<filename>.pub - this will generate the public key for you
-| **`wg_config` Keys** | Run `wg genkey \| tee privatekey \| wg pubkey > publickey` locally to generate a pair. Use the server private key in Terraform and the server public key in your client app. |
+## Availability Domain hunting
 
-📤 Outputs
-vm_public_ip: The IPv4 address of the created instance.
+Oracle's Always Free A1 instances are in high demand and often show "Out of Capacity". `hunt.sh` automates retrying across all Availability Domains until one succeeds.
 
-cloud-config: The raw cloud-init YAML used to bootstrap the server (useful for debugging).
+```bash
+chmod +x hunt.sh
 
-⚠️ Security Notes
-SSH Port 22: By default, this setup expects you to use WireGuard to access SSH. Ensure your Security List allows UDP 51820.
+# Run in a tmux session so it survives disconnects
+tmux new -s hunt
+./hunt.sh
+# Ctrl+B, D to detach
 
-Secrets: Never commit terraform.tfvars or your .pem key files to GitHub. Use .gitignore to exclude them.
+# Watch progress
+tail -f terraform_hunt.log
+```
 
+To receive a notification when the VM is created, set `NOTIFY_CMD` to any script that accepts the public IP as its first argument:
 
----
+```bash
+NOTIFY_CMD="./notify.sh" ./hunt.sh
+```
 
-### **Part 3: Configuration & Keys Guide**
+You can also target a specific Availability Domain directly:
 
-Here is a quick reference for Step 5 of your request ("Where to add/modify keys").
+```bash
+terraform apply -var="availability_domain=2"
+```
 
-**1. OCI Connection Keys**
-* **Location:** `terraform.tfvars` (top block).
-* **Source:** These come directly from the Oracle Cloud Console under **User Settings > API Keys**. You must upload a public key there and keep the private key on your laptop.
+## Security notes
 
-**2. SSH Public Key**
-* **Location:** `terraform.tfvars` -> `vm` -> `ssh_public_keys`.
-* **Source:** Your local computer. Run `cat ~/.ssh/id_ed25519.pub`. This allows you to log in initially.
-
-**3. WireGuard Keys (The VPN)**
-* **Location:** `terraform.tfvars` -> `wg_config`.
-* **Source:** You must generate these yourself.
-    * **Server Private Key:** Put this in the `terraform.tfvars` file under `PrivateKey`.
-    * **Client Public Key:** Put this in the `terraform.tfvars` file under `[Peer] PublicKey`.
-    * *Note:* You keep the *Client Private Key* on your laptop/phone app; it never goes into Terraform.
-
-**4. User Password Hash**
-* **Location:** `main.tf` -> `users` -> `passwd`.
-* **Source:** Generated via Python command (included in README). This is required if you want to use `sudo` commands that ask for a password.
-
-
-
-## 🏹 Bonus: Capacity Hunter (`hunt.sh`)
-
-Oracle's "Always Free" ARM64 instances (Ampere A1) are in high demand and often run out of capacity in certain Availability Domains (ADs).
-
-Included in this repo is `hunt.sh`, a bash script designed to automate the provisioning process until capacity becomes available.
-
-### **How it Works**
-1.  It enters an infinite loop.
-2.  It cycles through Availability Domains 1, 2, and 3.
-3.  It automatically modifies `main.tf` to switch the target AD.
-4.  It runs `terraform apply -auto-approve`.
-    * **If it fails:** It waits 10 seconds and tries the next AD.
-    * **If it succeeds:** It logs the success, sends a notification (optional), and exits.
-
-### **Usage**
-
-1.  **Prepare the Script:**
-    Open `hunt.sh` and look for the Telegram notification line near the bottom:
-    ```bash
-    /home/vipulgoyal/telegram_bot/tg.sh "Instance Created Successfully "$VM_IP
-    ```
-    * **Option A (Remove it):** Delete this line if you don't have a custom Telegram script.
-    * **Option B (Update it):** Point it to your own notification script or webhook.
-
-2.  **Make Executable:**
-    ```bash
-    chmod +x hunt.sh
-    ```
-
-3.  **Run in Background:**
-    Since this script might run for hours or days, use `tmux` or `screen` to keep it running if you disconnect:
-    ```bash
-    # Start a new tmux session
-    tmux new -s oracle_hunt
-
-    # Run the hunter
-    ./hunt.sh
-    ```
-    *(To detach from tmux, press `Ctrl+B` then `D`)*.
-
-4.  **Monitor:**
-    The script logs all activity to `terraform_hunt.log`. You can watch it in real-time:
-    ```bash
-    tail -f terraform_hunt.log
-    ```
+- Never commit `terraform.tfvars` or `.pem` files — both are in `.gitignore`
+- The Docker daemon binds to `127.0.0.1`; do not expose it to the network
+- Root login and password authentication are disabled via SSH hardening in cloud-init
