@@ -19,7 +19,10 @@ Terraform configuration to provision an [Oracle Cloud Always Free](https://www.o
 1. **Oracle Cloud account** — [sign up](https://www.oracle.com/cloud/free/), then [upgrade to PAYG](https://docs.oracle.com/en-us/iaas/Content/GSG/Tasks/signingup.htm) (you won't be charged while inside Always Free limits)
 2. **Terraform** — `brew install hashicorp/tap/terraform`
 3. **OCI API key** — generate in the Console under *User Settings → API Keys*, download the `.pem`
-4. **SSH key pair** — `ssh-keygen -t ed25519` if you don't have one
+4. **SSH key pair** — generate a dedicated key for this VM:
+   ```bash
+   ssh-keygen -t ed25519 -f ~/.ssh/oci_mamsoft -C "oci-mamsoft"
+   ```
 
 ## Usage
 
@@ -47,7 +50,7 @@ Edit `terraform.tfvars` with your OCI credentials and SSH public key. All other 
 | `oci_connection.user_ocid` | Console → Profile → User Settings → Copy OCID |
 | `oci_connection.fingerprint` | Console → User Settings → API Keys |
 | `oci_connection.private_key_path` | Local path to the downloaded `.pem` file |
-| `vm.ssh_public_keys` | Output of `cat ~/.ssh/id_ed25519.pub` |
+| `vm.ssh_public_keys` | Output of `cat ~/.ssh/oci_mamsoft.pub` |
 
 #### Optional: sudo password
 
@@ -95,7 +98,7 @@ Terraform outputs the VM's public IP on success.
 ### 4. Connect
 
 ```bash
-ssh mamsoft@<PUBLIC_IP>
+ssh -i ~/.ssh/oci_mamsoft mamsoft@<PUBLIC_IP>
 ```
 
 Docker Compose files can be placed anywhere under the `mamsoft` home directory. The Docker daemon listens on `127.0.0.1` only — expose services via a reverse proxy (e.g. Traefik, Caddy, or nginx-proxy) bound to ports 80/443.

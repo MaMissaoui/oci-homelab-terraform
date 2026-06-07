@@ -80,7 +80,7 @@ general = {
 vm = {
   name      = "mamsoft"
   ssh_public_keys = [
-    "ssh-ed25519 AAAA... your-comment"   # output of: cat ~/.ssh/id_ed25519.pub
+    "ssh-ed25519 AAAA... oci-mamsoft"   # output of: cat ~/.ssh/oci_mamsoft.pub
   ]
 
   os = {
@@ -93,7 +93,11 @@ vm = {
 }
 ```
 
-> **SSH key:** if you don't have one, generate it with `ssh-keygen -t ed25519`, then paste the contents of `~/.ssh/id_ed25519.pub` into `ssh_public_keys`.
+> **SSH key:** generate a dedicated key pair for this VM:
+> ```bash
+> ssh-keygen -t ed25519 -f ~/.ssh/oci_mamsoft -C "oci-mamsoft"
+> ```
+> Then paste the contents of `~/.ssh/oci_mamsoft.pub` into `ssh_public_keys`.
 
 > **Password (optional):** to enable password-based `sudo`, generate a hash and paste it into `password`:
 > ```bash
@@ -144,10 +148,20 @@ vm_public_ip = "X.X.X.X"
 ## Step 8 — Connect via SSH
 
 ```bash
-ssh mamsoft@<PUBLIC_IP>
+ssh -i ~/.ssh/oci_mamsoft mamsoft@<PUBLIC_IP>
 ```
 
 The VM reboots once after cloud-init completes (AppArmor and sysctl changes). If the first connection attempt is refused, wait 60 seconds and retry.
+
+**Tip:** add a host alias to `~/.ssh/config` so you can connect with just `ssh mamsoft`:
+
+```
+Host mamsoft
+    HostName      <PUBLIC_IP>
+    User          mamsoft
+    IdentityFile  ~/.ssh/oci_mamsoft
+    IdentitiesOnly yes
+```
 
 ---
 

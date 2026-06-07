@@ -26,9 +26,12 @@ vm = {
   image_name = "Canonical-Ubuntu-24.04-aarch64"
   private_ip = "172.16.0.2"
 
-  # Add your SSH public key (e.g. contents of ~/.ssh/id_ed25519.pub)
+  # SSH public key for VM access.
+  # Generate a dedicated key pair with:
+  #   ssh-keygen -t ed25519 -f ~/.ssh/oci_mamsoft -C "oci-mamsoft"
+  # Then paste the contents of ~/.ssh/oci_mamsoft.pub below.
   ssh_public_keys = [
-    "ssh-ed25519 <YOUR_PUBLIC_SSH_KEY> your-comment"
+    "ssh-ed25519 <YOUR_PUBLIC_SSH_KEY> oci-mamsoft"
   ]
 
   os = {
