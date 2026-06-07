@@ -1,60 +1,70 @@
 oci_connection = {
-  tenancy_ocid     = "<YOUR_TENANCY_OCID>" #"ocid1.tenancy.oc1..xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-  user_ocid        = "<YOUR_USER_OCID>" #"ocid1.user.oc1..xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  tenancy_ocid     = "<YOUR_TENANCY_OCID>"   # ocid1.tenancy.oc1..xxxx
+  user_ocid        = "<YOUR_USER_OCID>"       # ocid1.user.oc1..xxxx
   fingerprint      = "<YOUR_API_KEY_FINGERPRINT>"
-  private_key_path = "/path/to/your/oci_api_key.pem" $"~/.oci/key-private.pem"
-  region           = "<YOUR_REGION>" # e.g., us-phoenix-1
-  compartment_ocid = "<YOUR_COMPARTMENT_OCID>"
+  private_key_path = "~/.oci/oci_api_key.pem"
+  region           = "<YOUR_REGION>"          # e.g. eu-frankfurt-1, us-phoenix-1
 }
 
+# availability_domain controls which OCI AD to target (1, 2, or 3).
+# Override per-run with: terraform apply -var="availability_domain=2"
+# The hunt.sh script cycles through all ADs automatically.
+availability_domain = 1
+
 general = {
-  compartment_name    = "infrastructure"
-  bucket_name         = "backups"
+  compartment_name    = "mamsoft"
   main_network_cidr   = "172.16.0.0/16"
   private_subnet_cidr = "172.16.0.0/24"
 }
 
 vm = {
-  name       = "Infrastructure"
+  name       = "mamsoft"
   shape      = "VM.Standard.A1.Flex"
   cpus       = 4
   mem_size   = 24
-  disk_size  = 100
-  image_name = "Canonical-Ubuntu-22.04-aarch64"
+  disk_size  = 200
+  image_name = "Canonical-Ubuntu-24.04-aarch64"
   private_ip = "172.16.0.2"
-  
-  # Add your local machine's SSH Public Key here (e.g., contents of ~/.ssh/id_ed25519.pub)
+
+  # Add your SSH public key (e.g. contents of ~/.ssh/id_ed25519.pub)
   ssh_public_keys = [
-    "ssh-ed25519 <YOUR_PUBLIC_SSH_KEY> comment"
+    "ssh-ed25519 <YOUR_PUBLIC_SSH_KEY> your-comment"
   ]
-  
+
   os = {
-    hostname       = "infravm"
-    username       = "infra"
-    
-    # Optional: DNS servers (Cloudflare defaults)
-    force_dns = ["1.1.1.1", "1.0.0.1", "2606:4700:4700::1111", "2606:4700:4700::1001"]
+    hostname = "mamsoft"
+    username = "mamsoft"
 
-    # WireGuard Server Configuration
-    # Replace PrivateKey and PublicKey with keys generated via 'wg genkey'
-    wg_config = {
-      "wg0" = <<EOF
-[Interface]
-PrivateKey = <SERVER_PRIVATE_KEY>
-Address = 10.200.0.2/32
-ListenPort = 51820
-DNS = 10.200.0.1
-MTU = 1420
+    # Password hash for sudo access (optional — SSH key auth is sufficient).
+    # Generate with: python3 -c 'import crypt; print(crypt.crypt("YOUR_PASSWORD", crypt.mksalt(crypt.METHOD_SHA512)))'
+    password = ""
 
-[Peer]
-# The Public Key of your local client (Laptop/Phone)
-PublicKey = <CLIENT_PUBLIC_KEY>
-AllowedIPs = 10.200.0.1/32
-PersistentKeepalive = 25
-EOF
-    }
+    # Optional: force specific DNS servers (leave as [] to use defaults)
+    force_dns = []
+    # force_dns = ["1.1.1.1", "1.0.0.1"]
+
+    # Optional WireGuard configuration.
+    # Set wg_config = {} (or omit entirely) to disable WireGuard.
+    # When non-empty, UDP port 51820 is opened and wireguard-tools is installed.
+    wg_config = {}
+
+    # Example WireGuard config (generate keys with: wg genkey | tee privatekey | wg pubkey > publickey):
+    # wg_config = {
+    #   "wg0" = <<EOF
+    # [Interface]
+    # PrivateKey = <SERVER_PRIVATE_KEY>
+    # Address = 10.200.0.2/32
+    # ListenPort = 51820
+    # MTU = 1420
+    #
+    # [Peer]
+    # PublicKey = <CLIENT_PUBLIC_KEY>
+    # AllowedIPs = 10.200.0.1/32
+    # PersistentKeepalive = 25
+    # EOF
+    # }
   }
+
   daily_backups  = 3
   weekly_backups = 2
 }
-

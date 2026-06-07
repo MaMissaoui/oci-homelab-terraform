@@ -22,73 +22,27 @@ provider "oci" {
 resource "oci_identity_compartment" "identity" {
   compartment_id = var.oci_connection.tenancy_ocid
   name           = var.general.compartment_name
-  description    = "Compartment for self-hosted infrastructure"
+  description    = "Compartment for ${var.vm.name} infrastructure"
 }
 
 resource "oci_core_vcn" "main" {
   compartment_id = oci_identity_compartment.identity.id
-  display_name   = "Main VCN"
+  display_name   = "${var.vm.name} VCN"
   cidr_blocks    = [var.general.main_network_cidr]
   dns_label      = "mainvcn"
 }
 
-resource "oci_core_default_security_list" "only_egress" {
-  manage_default_resource_id = oci_core_vcn.main.default_security_list_id
-  display_name               = "Main Security List"
-  egress_security_rules {
-    destination = "0.0.0.0/0"
-    protocol    = "all"
-    description = "Allow all Egress traffic"
-  }
-  
-  ingress_security_rules {
-    protocol    = "17" # UDP
-    source      = "0.0.0.0/0"
-    description = "WireGuard"
-    udp_options {
-      min = 51820
-      max = 51820
-    }
-  }
-
-}
-
-data "oci_core_services" "all" {
-  filter {
-    name   = "name"
-    values = ["OCI .* Object Storage"]
-    regex  = true
-  }
-}
-
-resource "oci_core_service_gateway" "service_gateway" {
+resource "oci_core_internet_gateway" "igw" {
   compartment_id = oci_identity_compartment.identity.id
-  display_name   = "Service Gateway"
+  display_name   = "Internet Gateway"
   vcn_id         = oci_core_vcn.main.id
-  services {
-    service_id = data.oci_core_services.all.services[0].id
-  }
 }
 
-
-output "vm_public_ip" {
-  value = oci_core_instance.infra_vm.public_ip
-}
-
-resource "oci_core_route_table" "private" {
+resource "oci_core_route_table" "main" {
   compartment_id = oci_identity_compartment.identity.id
   display_name   = "Main Route Table"
   vcn_id         = oci_core_vcn.main.id
 
-  # Rule 1: Traffic to Oracle Services (Object Storage, etc.) stays on the Oracle Network
-  route_rules {
-    destination       = data.oci_core_services.all.services[0].cidr_block
-    destination_type  = "SERVICE_CIDR_BLOCK"
-    network_entity_id = oci_core_service_gateway.service_gateway.id
-    description       = "OCI Services traffic through Service Gateway"
-  }
-
-  # Rule 2: All other Internet traffic goes through the Internet Gateway (Allows VPN)
   route_rules {
     destination       = "0.0.0.0/0"
     destination_type  = "CIDR_BLOCK"
@@ -97,33 +51,70 @@ resource "oci_core_route_table" "private" {
   }
 }
 
-resource "oci_core_subnet" "private" {
+resource "oci_core_default_security_list" "main" {
+  manage_default_resource_id = oci_core_vcn.main.default_security_list_id
+  display_name               = "Main Security List"
+
+  egress_security_rules {
+    destination = "0.0.0.0/0"
+    protocol    = "all"
+    description = "Allow all egress traffic"
+  }
+
+  ingress_security_rules {
+    protocol    = "6" # TCP
+    source      = "0.0.0.0/0"
+    description = "SSH"
+    tcp_options {
+      min = 22
+      max = 22
+    }
+  }
+
+  ingress_security_rules {
+    protocol    = "6" # TCP
+    source      = "0.0.0.0/0"
+    description = "HTTP"
+    tcp_options {
+      min = 80
+      max = 80
+    }
+  }
+
+  ingress_security_rules {
+    protocol    = "6" # TCP
+    source      = "0.0.0.0/0"
+    description = "HTTPS"
+    tcp_options {
+      min = 443
+      max = 443
+    }
+  }
+
+  dynamic "ingress_security_rules" {
+    for_each = length(var.vm.os.wg_config) > 0 ? [1] : []
+    content {
+      protocol    = "17" # UDP
+      source      = "0.0.0.0/0"
+      description = "WireGuard"
+      udp_options {
+        min = 51820
+        max = 51820
+      }
+    }
+  }
+}
+
+resource "oci_core_subnet" "main" {
   compartment_id = oci_identity_compartment.identity.id
-  display_name   = "Private Subnet"
+  display_name   = "Main Subnet"
   vcn_id         = oci_core_vcn.main.id
-  route_table_id = oci_core_route_table.private.id
+  route_table_id = oci_core_route_table.main.id
   cidr_block     = var.general.private_subnet_cidr
-  dns_label      = "prvsubnet"
+  dns_label      = "mainsubnet"
 
   prohibit_internet_ingress  = false
   prohibit_public_ip_on_vnic = false
-}
-
-resource "oci_identity_customer_secret_key" "s3_credentials" {
-  user_id      = var.oci_connection.user_ocid
-  display_name = "Credentials for S3 access"
-}
-
-data "oci_objectstorage_namespace" "s3_namespace" {
-  compartment_id = var.oci_connection.tenancy_ocid
-}
-
-resource "oci_objectstorage_bucket" "s3_bucket" {
-  compartment_id = oci_identity_compartment.identity.id
-  namespace      = data.oci_objectstorage_namespace.s3_namespace.namespace
-  name           = var.general.bucket_name
-  storage_tier   = "Standard"
-  access_type    = "NoPublicAccess"
 }
 
 locals {
@@ -153,14 +144,6 @@ write_files:
         "max-concurrent-uploads": 25,
         "storage-driver": "overlay2"
       }
-  - path: /etc/environment
-    content: |
-      AWS_ACCESS_KEY_ID="${oci_identity_customer_secret_key.s3_credentials.id}"
-      AWS_SECRET_ACCESS_KEY="${oci_identity_customer_secret_key.s3_credentials.key}"
-      AWS_REGION="${var.oci_connection.region}"
-      S3_ENDPOINT_URL="https://${data.oci_objectstorage_namespace.s3_namespace.namespace}.compat.objectstorage.${var.oci_connection.region}.oraclecloud.com"
-      S3_BUCKET="${oci_objectstorage_bucket.s3_bucket.name}"
-    append: true
 %{for ifname, config in var.vm.os.wg_config~}
   - path: /etc/wireguard/${trimspace(ifname)}.conf
     content: |
@@ -186,7 +169,7 @@ write_files:
       echo -e "%{for addr in var.vm.os.force_dns~}nameserver ${addr}\n%{endfor~}" > /etc/resolv.conf
       ln --symbolic /bin/true /usr/local/bin/resolvconf
 %{endif~}
-      apt-get install -y --no-install-recommends --no-install-suggests jq git htop wireguard-tools net-tools docker-ce docker-compose-plugin docker-buildx-plugin
+      apt-get install -y --no-install-recommends --no-install-suggests jq git htop %{if length(var.vm.os.wg_config) > 0~}wireguard-tools %{endif~}net-tools docker-ce docker-compose-plugin docker-buildx-plugin
       apt-get autoremove -y --purge
       curl --location "$(curl --location "https://api.github.com/repos/peak/s5cmd/releases/latest" | jq -r '.assets[] | select(.name? | match("_Linux-arm64.tar.gz$")) | .browser_download_url')" | tar --extract --gzip --file=- --directory="/usr/local/bin" s5cmd
       curl --location "$(curl --location "https://api.github.com/repos/bcicen/ctop/releases/latest" | jq -r '.assets[] | select(.name? | match("-linux-arm64$")) | .browser_download_url')" -o /usr/local/bin/ctop
@@ -196,7 +179,7 @@ write_files:
 apt:
   sources:
     docker.list:
-      source: deb [arch=arm64] https://download.docker.com/linux/ubuntu jammy stable
+      source: deb [arch=arm64] https://download.docker.com/linux/ubuntu noble stable
       keyid: 9DC858229FC7DD38854AE2D88D81803C0EBFCD88
 
 package_update: true
@@ -216,10 +199,7 @@ users:
       - docker
     sudo: "ALL=(ALL)"
     lock_passwd: false
-    # REPLACE THIS with your own generated hash: 
-    # python3 -c 'import crypt; print(crypt.crypt("YOUR_PASSWORD", crypt.mksalt(crypt.METHOD_SHA512)))'
-    passwd: <YOUR_GENERATED_PASSWORD_HASH> 
-
+    passwd: ${var.vm.os.password}
     shell: /bin/bash
     ssh_authorized_keys:
 %{for key in var.vm.ssh_public_keys~}
@@ -228,18 +208,19 @@ users:
 
 power_state:
   mode: reboot
-    EOF
+  EOF
 }
 
-output "cloud-config" {
-  value = local.cloud_config
+output "cloud_config" {
+  value     = local.cloud_config
+  sensitive = true
 }
 
 data "oci_core_images" "ubuntu_image" {
   compartment_id = var.oci_connection.tenancy_ocid
-  
+
   operating_system = "Canonical Ubuntu"
-  shape = var.vm.shape
+  shape            = var.vm.shape
 
   filter {
     name   = "display_name"
@@ -253,10 +234,10 @@ data "oci_core_images" "ubuntu_image" {
 
 data "oci_identity_availability_domain" "ad" {
   compartment_id = var.oci_connection.tenancy_ocid
-  ad_number = 1
+  ad_number      = var.availability_domain
 }
 
-resource "oci_core_instance" "infra_vm" {
+resource "oci_core_instance" "vm" {
   compartment_id       = oci_identity_compartment.identity.id
   display_name         = "${var.vm.name} VM"
   availability_domain  = data.oci_identity_availability_domain.ad.name
@@ -278,7 +259,7 @@ resource "oci_core_instance" "infra_vm" {
     network_type     = "PARAVIRTUALIZED"
   }
   create_vnic_details {
-    subnet_id        = oci_core_subnet.private.id
+    subnet_id        = oci_core_subnet.main.id
     display_name     = "vnic0"
     hostname_label   = var.vm.os.hostname
     private_ip       = var.vm.private_ip
@@ -321,12 +302,10 @@ resource "oci_core_volume_backup_policy" "backup" {
 }
 
 resource "oci_core_volume_backup_policy_assignment" "backup" {
-  asset_id  = oci_core_instance.infra_vm.boot_volume_id
+  asset_id  = oci_core_instance.vm.boot_volume_id
   policy_id = oci_core_volume_backup_policy.backup.id
 }
 
-resource "oci_core_internet_gateway" "igw" {
-  compartment_id = oci_identity_compartment.identity.id
-  display_name   = "Internet Gateway"
-  vcn_id         = oci_core_vcn.main.id
+output "vm_public_ip" {
+  value = oci_core_instance.vm.public_ip
 }
